@@ -8,5 +8,5 @@ class User(Base):
     __table_args__ = {"schema": "public"}
 
     id_user = Column(Integer, primary_key=True)
-    username = Column(String(50), index=True, nullable=False)
+    username = Column(String(50), unique=True, index=True, nullable=False)
     password = Column(String(250), nullable=False)

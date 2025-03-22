@@ -1,52 +1,66 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
+from sqlalchemy import insert
 from app.db.session import get_session
 from app.models.user import User  # Adjust the import according to your project structure
-from app.schemas.user import UserCreate, UserUpdate, UserRead  # Define these schemas
+import app.schemas.user as user_schemas
+import typing as tp
+from app.db.queries import get_user_by_username
+from sqlalchemy.exc import NoResultFound
+from app.core import auth
 
-router = APIRouter(prefix="/users")
+router = APIRouter(prefix="/user")
 
-@router.post("/", response_model=UserRead)
-async def create_user(user: UserCreate, db: AsyncSession = Depends(get_session)):
-    new_user = User(**user.dict())
-    db.add(new_user)
+
+
+
+
+
+# ------------------Token-----------------
+@router.post('/token', status_code=200)
+async def create_api_token(
+        user_login: user_schemas.UserCreate
+) -> user_schemas.Token:
+    try:
+        user_db = await get_user_by_username(user_login.username)
+    except NoResultFound:
+        raise HTTPException(status_code=400, detail=f'no user with username {user_login.username}')
+    print(user_db)
+    is_password_correct = auth.verify_password(user_login.password, user_db.password)
+    if not is_password_correct:
+        raise HTTPException(status_code=400, detail=f'Incorrect password for username: {user_login.username}')
+
+    token = auth.generate_token(user_login.username)
+    return user_schemas.Token(access_token=token, token_type='bearer')
+
+
+
+@router.get('/', status_code=200)
+async def get_current_user(
+        user_db: User = Depends(auth.get_current_user)
+) -> user_schemas.UserBase:
+    return user_schemas.UserBase(username=str(user_db.username))
+
+
+@router.post('/', status_code=201)
+async def create_user(
+        user: user_schemas.UserCreate,
+        db:AsyncSession=Depends(get_session)
+):
+    try:
+        user_db = await get_user_by_username(user.username)
+    except NoResultFound:
+        user_db = None
+    if user_db is not None:
+        raise HTTPException(status_code=400, detail=f'Пользователь с username {user.username} уже существует')
+    hashed_password = auth.get_password_hash(user.password)
+    user_data = user.model_dump()
+    user_data['hashed_password'] = hashed_password
+    insert_stmt = (
+        insert(User)
+        .values(password=hashed_password, username=user.username)
+        .returning(User.id_user)
+    )
+    user_id = (await db.execute(insert_stmt)).scalar()
     await db.commit()
-    await db.refresh(new_user)
-    return new_user
-
-@router.get("/{user_id}", response_model=UserRead)
-async def get_user(user_id: int, db: AsyncSession = Depends(get_session)):
-    result = await db.execute(select(User).where(User.id_user == user_id))
-    user = result.scalar_one_or_none()
-    if user is None:
-        raise HTTPException(status_code=404, detail="User not found")
-    return user
-
-@router.get("/", response_model=list[UserRead])
-async def list_users(db: AsyncSession = Depends(get_session)):
-    result = await db.execute(select(User))
-    users = result.scalars().all()
-    return users
-
-@router.put("/{user_id}", response_model=UserRead)
-async def update_user(user_id: int, user: UserUpdate, db: AsyncSession = Depends(get_session)):
-    result = await db.execute(select(User).where(User.id_user == user_id))
-    db_user = result.scalar_one_or_none()
-    if db_user is None:
-        raise HTTPException(status_code=404, detail="User not found")
-    for key, value in user.dict(exclude_unset=True).items():
-        setattr(db_user, key, value)
-    await db.commit()
-    await db.refresh(db_user)
-    return db_user
-
-@router.delete("/{user_id}", response_model=UserRead)
-async def delete_user(user_id: int, db: AsyncSession = Depends(get_session)):
-    result = await db.execute(select(User).where(User.id_user == user_id))
-    db_user = result.scalar_one_or_none()
-    if db_user is None:
-        raise HTTPException(status_code=404, detail="User not found")
-    await db.delete(db_user)
-    await db.commit()
-    return db_user
+    return {'msg': "Created", 'id': user_id}
