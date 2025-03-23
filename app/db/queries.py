@@ -7,4 +7,5 @@ from app.db.session import async_session
 
 async def get_user_by_username(username) -> User:
     async with async_session() as db:
-        return (await db.execute(select(User).where(User.username == username))).scalar()
+        user = (await db.execute(select(User).where(User.username == username))).one()[0]
+        return user
