@@ -15,5 +15,3 @@ passlib
 jose
 PyJWT
 python-multipart
-torch
-numpy

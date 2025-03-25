@@ -2,12 +2,13 @@
 from fastapi import APIRouter, Depends
 from app.schemas.recommender import GetGameRequest, GetGameResponse, UserResponseRequest
 from app.models.user import User
+from app.models.game import Game
+from app.models.reaction import Reaction
 from app.core.auth import get_current_user
-import torch
-import torch.nn as nn
-import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
-from torch.nn.utils.rnn import pad_sequence
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, or_
+from app.db.session import get_session
+import random
 
 router = APIRouter(prefix="/recommender")
 
@@ -61,12 +62,102 @@ class GameRecommendationsModel:
 
 
 @router.post("/get_game", response_model=GetGameResponse)
-def get_game(params: GetGameRequest, user: User = Depends(get_current_user)):
-    # todo
-    return GetGameResponse(id_game=10)
+async def get_game(params: GetGameRequest, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_session)):
+    list_liked_games = await db.execute(
+        select(
+            Game.id_game
+        ).join(Reaction).where(
+            (Reaction.id_user == user.id_user) &
+            (or_(
+                Reaction.has_played == True,
+                Reaction.want_to_play == True
+            ))
+        )
+    )
+
+
+    list_disliked_games = await db.execute(
+            select(
+                Game.id_game
+            ).join(Reaction).where(
+                (Reaction.id_user == user.id_user) &
+                (Reaction.want_to_play == False)
+            )
+        )
+    
+    list_to_recommend = await db.execute(
+         select(
+              Game.id_game,
+              Game.title,
+              Game.header_image
+         ).where(
+              (Game.short_description != 'string') &
+            (Game.header_image != 'string') &
+            (Game.positive_ratio >= 50)
+         )
+    )
+
+    sequence = [row.id_game for row in list_liked_games.all()]
+    false_sequence = [row.id_game for row in list_disliked_games.all()]
+
+    # recomModel = GameRecommendationsModel()
+    # top_item_ids = recomModel.get_recommendation(sequence)
+
+    recommendation = 0
+
+    for id in list_to_recommend:
+        if id[0] in false_sequence or id[0] in sequence:
+            continue
+        recommendation = id
+        break
+
+    return GetGameResponse(id_game=recommendation[0])
 
 
 @router.post("/user_response")
-def user_response(data: UserResponseRequest, user: User = Depends(get_current_user)):
-    # todo
-    return {"msg": "ok"}
+async def user_response(data: UserResponseRequest, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_session)):
+    list_liked_games = await db.execute(
+        select(
+            Game.id_game
+        ).join(Reaction).where(
+            (Reaction.id_user == user.id_user) &
+            (or_(
+                Reaction.has_played == True,
+                Reaction.want_to_play == True
+            ))
+        )
+    )
+
+    list_disliked_games = await db.execute(
+            select(
+                Game.id_game
+            ).join(Reaction).where(
+                (Reaction.id_user == user.id_user) &
+                (Reaction.want_to_play == False)
+            )
+        )
+    
+    list_to_recommend = await db.execute(
+         select(
+              Game.id_game,
+              Game.title,
+              Game.header_image
+         )
+    )
+
+    sequence = [row.id_game for row in list_liked_games.all()]
+    false_sequence = [row.id_game for row in list_disliked_games.all()]
+
+    # recomModel = GameRecommendationsModel()
+    # top_item_ids = recomModel.get_recommendation(sequence)
+
+    recommendation = 0
+
+    for id in list_to_recommend:
+        while id in false_sequence or id in sequence:
+            continue
+        recommendation = id
+        break
+         
+
+    return GetGameResponse(id_game=recommendation[0])
