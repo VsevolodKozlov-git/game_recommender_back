@@ -12,7 +12,7 @@ import csv
 
 router = APIRouter(prefix="/game")
 
-@router.get("/{game_id}", response_model=GameInfoResponse)
+@router.get("/{id_game}", response_model=GameInfoResponse)
 async def get_game(
     id_game: int, 
     db: AsyncSession = Depends(get_session),
