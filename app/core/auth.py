@@ -18,7 +18,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 800000
 # hasher setup
 crypto_context = CryptContext(schemes=['bcrypt'], deprecated='auto')
 # auth scheme setup
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="user/token")
 
 
 def verify_password(provided_password, actual_hash):

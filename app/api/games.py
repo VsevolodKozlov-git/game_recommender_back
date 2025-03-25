@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from app.db.session import get_session
@@ -6,76 +6,116 @@ from app.models.game import Game
 from app.models.user import User
 from app.schemas.game import GameInfoResponse  
 from app.core.auth import get_current_user
+from datetime import datetime
+from decimal import Decimal
+import csv
 
 router = APIRouter(prefix="/game")
 
-# @router.post("/", response_model=GameRead)
-# async def create_game(game: GameCreate, db: AsyncSession = Depends(get_session)):
-#     new_game = Game(**game.dict())
-#     db.add(new_game)
-#     await db.commit()
-#     await db.refresh(new_game)
-#     return new_game
-
-next_response = 0
 @router.get("/{game_id}", response_model=GameInfoResponse)
-async def get_game(game_id: int, db: AsyncSession = Depends(get_session), user: User = Depends(get_current_user)):
-    # todo
-    # result = await db.execute(select(Game).where(Game.id_game == game_id))
-    # game = result.scalar_one_or_none()
-    # if game is None:
-    #     raise HTTPException(status_code=404, detail="Game not found")
-    global next_response
-    
-    description0 = """Factorio - это игра, в которой вы строите фабрики и поддерживаете их работу.
-
-Вы будете добывать ресурсы, исследовать новые технологии, создавать инфраструктуру, автоматизировать производство и сражаться с врагами.
-
-На начальном этапе игры Вы будете вручную рубить деревья, добывать руду и создавать простые манипуляторы и транспортные конвейеры, но через некоторое время Вы, наконец, сможете подняться до энергетической индустрии с огромными солнечными фермами, перегонкой и переработкой нефти, построить роботов и развернуть логистическую сеть, настроенную для Ваших потребностей в ресурсах.
-    """
-    response0 = GameInfoResponse(
-        title="Factorio",
-        header_image="https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/427520/header.jpg?t=1730307306",
-        short_description=description0,
+async def get_game(
+    id_game: int, 
+    db: AsyncSession = Depends(get_session),
+):
+    # Execute async query
+    result = await db.execute(
+        select(Game).where(Game.id_game == id_game)
     )
-    
-    description1 = """Игра в жанре выживание, в которой вам предстоит исследовать огромный фэнтезийный мир, пропитанный скандинавской мифологией и культурой викингов."""
-    response1 = GameInfoResponse(
-        title="Valheim",
-        header_image="https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/892970/header.jpg?t=1738051073",
-        short_description=description1,
+    game = result.scalar_one_or_none()
+
+    # Handle not found case
+    if not game:
+        raise HTTPException(
+            status_code=404,
+            detail="Game not found"
+        )
+
+    # Return only required fields using the response model
+    return GameInfoResponse(
+        title=game.title,
+        header_image=game.header_image,
+        short_description=game.short_description
     )
-    response = [response0, response1][next_response]
+
+
+
+@router.post("/upload-games-csv/")
+async def upload_games_csv(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_session)
+):
+    if not file.filename.endswith(".csv"):
+        raise HTTPException(400, "Only CSV files accepted")
+
+    content = await file.read()
+    decoded_content = content.decode("utf-8").splitlines()
+    csv_reader = csv.DictReader(decoded_content)
+
+    required_columns = {
+        "app_id", "title", "date_release", "win", "mac", "linux",
+        "rating", "positive_ratio", "user_reviews", "price_final",
+        "header_image", "short_description"
+    }
     
- 
-    next_response = (next_response+1) % 2
+    # Validate headers
+    if not required_columns.issubset(csv_reader.fieldnames):
+        missing = required_columns - set(csv_reader.fieldnames)
+        raise HTTPException(400, f"Missing columns: {missing}")
+
+    valid_games = []
+    error_rows = []
     
-    return response
+    for row_idx, row in enumerate(csv_reader, start=2):
+        try:
+            # Skip empty rows
+            if not any(row.values()): continue
 
-# @router.get("/", response_model=list[GameRead])
-# async def list_games(db: AsyncSession = Depends(get_session)):
-#     result = await db.execute(select(Game))
-#     games = result.scalars().all()
-#     return games
+            # Validate app_id is numeric
+            if not row["app_id"].strip().isdigit():
+                raise ValueError(f"Invalid app_id: {row['app_id']}")
 
-# @router.put("/{game_id}", response_model=GameRead)
-# async def update_game(game_id: int, game: GameUpdate, db: AsyncSession = Depends(get_session)):
-#     result = await db.execute(select(Game).where(Game.id_game == game_id))
-#     db_game = result.scalar_one_or_none()
-#     if db_game is None:
-#         raise HTTPException(status_code=404, detail="Game not found")
-#     for key, value in game.dict(exclude_unset=True).items():
-#         setattr(db_game, key, value)
-#     await db.commit()
-#     await db.refresh(db_game)
-#     return db_game
+            # Validate required fields
+            required_fields = ["title", "header_image", "date_release"]
+            for field in required_fields:
+                if not row.get(field):
+                    raise ValueError(f"Missing {field}")
 
-# @router.delete("/{game_id}", response_model=GameRead)
-# async def delete_game(game_id: int, db: AsyncSession = Depends(get_session)):
-#     result = await db.execute(select(Game).where(Game.id_game == game_id))
-#     db_game = result.scalar_one_or_none()
-#     if db_game is None:
-#         raise HTTPException(status_code=404, detail="Game not found")
-#     await db.delete(db_game)
-#     await db.commit()
-#     return db_game
+            game_data = Game(
+                id_game=int(row["app_id"]),
+                title=row["title"].strip(),
+                header_image=row["header_image"].strip(),
+                date_release=datetime.strptime(row["date_release"], "%Y-%m-%d").date(),
+                win=row["win"].strip().lower() == "true",
+                mac=row["mac"].strip().lower() == "true",
+                linux=row["linux"].strip().lower() == "true",
+                rating=row["rating"].strip(),
+                positive_ratio=int(row["positive_ratio"]),
+                user_reviews=int(row["user_reviews"]),
+                price_final=Decimal(row["price_final"]),
+                short_description=row["short_description"].strip()
+            )
+            valid_games.append(game_data)
+            
+        except Exception as e:
+            error_rows.append({
+                "row": row_idx,
+                "error": str(e),
+                "app_id": row.get("app_id"),
+                "title": row.get("title")
+            })
+            continue
+
+    # Insert valid records
+    if valid_games:
+        try:
+            db.add_all(valid_games)
+            await db.commit()
+        except Exception as e:
+            await db.rollback()
+            raise HTTPException(500, f"Database error: {str(e)}")
+
+    return {
+        "message": f"Inserted {len(valid_games)} games",
+        "errors": error_rows,
+        "error_count": len(error_rows)
+    }

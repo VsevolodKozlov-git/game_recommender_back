@@ -1,4 +1,4 @@
-from app.api import service_call, users, games, questions, surveys, recommender
+from app.api import service_call, users, games, questions, surveys, recommender, reactions
 from fastapi import FastAPI
 
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,7 +28,8 @@ root_routers = [
     (games.router, ["Game Management"]),
     (surveys.router, ["Survey Management"]),
     (questions.router, ["Question Management"]),
-    (recommender.router, ['Рекомендательная система'])
+    (recommender.router, ['Рекомендательная система']),
+    (reactions.router, ['Реакции'])
 ]
 
 include_routers(root_routers, "")

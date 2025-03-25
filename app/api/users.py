@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import insert
 from app.db.session import get_session
@@ -19,7 +20,7 @@ router = APIRouter(prefix="/user")
 # ------------------Token-----------------
 @router.post('/token', status_code=200)
 async def create_api_token(
-        user_login: user_schemas.UserCreate
+        user_login: tp.Annotated[OAuth2PasswordRequestForm, Depends()]
 ) -> user_schemas.Token:
     try:
         user_db = await get_user_by_username(user_login.username)
